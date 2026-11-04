@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulado IFPA - Web</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+</head>
+<body class="bg-slate-50 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel">
+        function App() {
+            const [view, setView] = React.useState('login'); // login, lista, simulado, resultado
+            const [token, setToken] = React.useState(localStorage.getItem('token') || '');
+            const [simulados, setSimulados] = React.useState([]);
+            const [tentativa, setTentativa] = React.useState(null);
+            const [respostas, setRespostas] = React.useState({});
+            const [questaoAtual, setQuestaoAtual] = React.useState(0);
+            const [tempo, setTempo] = React.useState(0);
+            const [resultado, setResultado] = React.useState(null);
+
+            const fetchAuth = (url, opts = {}) => {
+                return fetch(url, {
+                    ...opts,
+                    headers: { ...opts.headers, 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
+                });
+            };
+
+            React.useEffect(() => {
+                if (token && view === 'lista') {
+                    fetchAuth('/simulados').then(r => r.json()).then(setSimulados);
+                }
+            }, [token, view]);
+
+            React.useEffect(() => {
+                if (tempo > 0 && view === 'simulado') {
+                    const timer = setInterval(() => setTempo(t => t - 1), 1000);
+                    return () => clearInterval(timer);
+                }
+            }, [tempo, view]);
+
+            const salvarToken = (t) => {
+                setToken(t);
+                localStorage.setItem('token', t);
+                setView('lista');
+            };
+
+            const iniciar = async (id) => {
+                const res = await fetchAuth(`/simulados/${id}/tentativas`, { method: 'POST' });
+                const data = await res.json();
+                setTentativa(data);
+                setTempo(data.segundosRestantes);
+                setView('simulado');
+            };
+
+            const finalizar = async () => {
+                const res = await fetchAuth(`/tentativas/${tentativa.tentativaId}/finalizar`, {
+                    method: 'POST',
+                    body: JSON.stringify({ respostas: Object.entries(respostas).map(([questaoId, alternativa]) => ({ questaoId, alternativa })) })
+                });
+                const data = await res.json();
+                setResultado(data);
+                setView('resultado');
+            };
+
+            if (view === 'login') return (
+                <div className="max-w-md mx-auto mt-20 p-8 bg-white rounded-lg shadow">
+                    <h1 className="text-2xl font-bold mb-4 text-blue-800">Login Simulado</h1>
+                    <p className="text-sm text-slate-600 mb-4">Insira o token do Supabase para testar a API:</p>
+                    <input type="text" value={token} onChange={e => setToken(e.target.value)} className="w-full p-2 border rounded mb-4" placeholder="Token Bearer..." />
+                    <button onClick={() => salvarToken(token)} className="w-full bg-blue-600 text-white p-2 rounded">Entrar</button>
+                </div>
+            );
+
+            if (view === 'lista') return (
+                <div className="max-w-4xl mx-auto p-6">
+                    <div className="flex justify-between items-center mb-6">
+                        <h1 className="text-3xl font-bold text-blue-800">Simulados ENADE 2026</h1>
+                        <button onClick={() => setView('login')} className="text-sm text-blue-600 underline">Trocar Token</button>
+                    </div>
+                    <div className="grid gap-4">
+                        {simulados.map(s => (
+                            <div key={s.id} className="bg-white p-6 rounded-lg shadow border flex justify-between items-center">
+                                <div>
+                                    <h2 className="text-xl font-semibold">{s.titulo}</h2>
+                                    <p className="text-slate-500">{s.totalQuestoes} questões • {s.duracaoMin} min</p>
+                                </div>
+                                <button onClick={() => iniciar(s.id)} className="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700">Iniciar</button>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            );
+
+            if (view === 'simulado') {
+                const q = tentativa.questoes[questaoAtual];
+                return (
+                    <div className="max-w-3xl mx-auto p-6">
+                        <div className="flex justify-between items-center bg-white p-4 rounded shadow mb-6">
+                            <span className="font-mono text-2xl font-bold text-red-600">{Math.floor(tempo/60)}:{String(tempo%60).padStart(2,'0')}</span>
+                            <span className="font-semibold">Questão {questaoAtual + 1} de {tentativa.questoes.length}</span>
+                        </div>
+                        <div className="bg-white p-8 rounded shadow mb-6">
+                            <div className="flex gap-2 mb-2">
+                                <span className="text-xs bg-blue-100 text-blue-800 px-2 py-1 rounded">{q.disciplina}</span>
+                                <span className="text-xs bg-slate-100 text-slate-800 px-2 py-1 rounded">{q.topico}</span>
+                            </div>
+                            <p className="text-lg mb-6">{q.enunciado}</p>
+                            <div className="space-y-3">
+                                {q.alternativas.map(a => (
+                                    <button key={a.letra} onClick={() => setRespostas(p => ({...p, [q.id]: a.letra}))}
+                                        className={`w-full p-4 text-left border rounded transition-colors ${respostas[q.id] === a.letra ? 'bg-blue-600 text-white' : 'hover:bg-slate-50'}`}>
+                                        <span className="font-bold mr-2">{a.letra})</span> {a.texto}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex justify-between">
+                            <button disabled={questaoAtual === 0} onClick={() => setQuestaoAtual(c => c - 1)} className="px-6 py-2 bg-slate-200 rounded disabled:opacity-50">Anterior</button>
+                            {questaoAtual < tentativa.questoes.length - 1 ?
+                                <button onClick={() => setQuestaoAtual(c => c + 1)} className="px-6 py-2 bg-blue-600 text-white rounded">Próxima</button> :
+                                <button onClick={finalizar} className="px-6 py-2 bg-green-600 text-white rounded font-bold hover:bg-green-700">Finalizar e Ver Gabarito</button>
+                            }
+                        </div>
+                    </div>
+                );
+            }
+
+            if (view === 'resultado') return (
+                <div className="max-w-4xl mx-auto p-6">
+                    <div className="bg-white p-8 rounded shadow text-center mb-8">
+                        <h2 className="text-3xl font-bold mb-2">Resultado Final</h2>
+                        <div className="text-6xl font-black text-blue-600 mb-4">{resultado.nota}<span className="text-2xl text-slate-400">/100</span></div>
+                        <div className="flex justify-center gap-8 text-slate-600">
+                            <div><span className="block font-bold text-2xl text-slate-800">{resultado.acertos}</span> Acertos</div>
+                            <div><span className="block font-bold text-2xl text-slate-800">{resultado.total}</span> Total</div>
+                        </div>
+                        {resultado.alertaMonitoria && (
+                            <div className="mt-6 p-4 bg-orange-100 text-orange-800 rounded-lg border border-orange-200">
+                                ⚠️ Atenção: Seu desempenho está abaixo do limiar ({resultado.limiar}). Sugerimos monitoria.
+                            </div>
+                        )}
+                    </div>
+
+                    <h3 className="text-2xl font-bold mb-4 text-slate-800">Gabarito Comentado</h3>
+                    <div className="space-y-6">
+                        {resultado.itensComentados.map((item, i) => (
+                            <div key={item.questaoId} className={`p-6 rounded-lg border-2 bg-white ${item.correta ? 'border-green-200' : 'border-red-200'}`}>
+                                <div className="flex justify-between mb-4">
+                                    <span className="font-bold text-slate-500">QUESTÃO {i+1}</span>
+                                    <span className={`font-bold ${item.correta ? 'text-green-600' : 'text-red-600'}`}>
+                                        {item.correta ? '✓ ACERTOU' : '✗ ERROU'}
+                                    </span>
+                                </div>
+                                <p className="mb-4 text-slate-800">{item.enunciado}</p>
+                                <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
+                                    <div className="p-3 bg-slate-50 rounded">
+                                        <span className="block text-slate-500 uppercase text-xs font-bold">Sua Resposta</span>
+                                        <span className="text-lg font-bold">{item.escolhida || 'Nenhuma'}</span>
+                                    </div>
+                                    <div className="p-3 bg-green-50 rounded">
+                                        <span className="block text-green-600 uppercase text-xs font-bold">Gabarito</span>
+                                        <span className="text-lg font-bold text-green-700">{item.alternativaCorreta}</span>
+                                    </div>
+                                </div>
+                                <div className="p-4 bg-blue-50 rounded-lg mb-4">
+                                    <span className="block text-blue-700 font-bold mb-1">Comentário do Professor:</span>
+                                    <p className="text-blue-900 text-sm italic">{item.justificativa || 'Sem justificativa disponível.'}</p>
+                                </div>
+                                <button 
+                                    onClick={async () => {
+                                        const res = await fetchAuth(`/ia/questoes/${item.questaoId}/explicar`, { method: 'POST' });
+                                        const data = await res.json();
+                                        alert(data.explicacaoIA);
+                                    }}
+                                    className="w-full bg-purple-600 text-white p-2 rounded text-sm font-bold hover:bg-purple-700">
+                                    ✨ Pedir explicação detalhada da IA
+                                </button>
+                            </div>
+                        ))}
+                    </div>
+                    <button onClick={() => window.location.reload()} className="mt-8 w-full bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 transition-colors">Voltar aos Simulados</button>
+                </div>
+            );
+        }
+        ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+    </script>
+</body>
+</html>
